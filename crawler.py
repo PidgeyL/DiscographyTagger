@@ -116,16 +116,17 @@ def album_by_title(artist, title):
 
 
 class Song():
-    __slots__ = ('path', 'mbid', 'required_tags', 'type',
-                 'title', 'artist', 'album', 'year', 'track', 'genre',
-                 'cover', 'albumartist')
+    #__slots__ = ('path', 'mbid', 'required_tags', 'type', 'extras',
+    #             'title', 'artist', 'album', 'date', 'tracknumber',
+    #             'genre', 'cover', 'albumartist')
     def __init__(self, path_, type_=None, overwrite=False):
-        self.required_tags = ('title', 'artist', 'album', 'year', 'track',
-                              'genre', 'cover')
+        self.required_tags = ('title', 'artist', 'album', 'date',
+                              'tracknumber', 'genre', 'cover', 'albumartist')
       
         self.path   = path_
         self.mbid   = None
         self.type   = type_ or (os.path.splitext(path_)[-1])[1:]
+        self.extras = {}
         self.read_tags()
         self._identify(overwrite)
 
@@ -140,11 +141,17 @@ class Song():
         self.title       = read_tag(tags.get('title'))
         self.artist      = read_tag(tags.get('artist'))
         self.album       = read_tag(tags.get('album'))
-        self.year        = read_tag(tags.get('date'))
-        self.track       = read_tag(tags.get('tracknumber'))
+        self.date        = read_tag(tags.get('date'))
+        year = re.search("^.*(\d{4}).*$", self.date)
+        if year: self.date = year.group(1)
+        self.tracknumber = read_tag(tags.get('tracknumber'))
+        print(self.tracknumber)
         self.genre       = read_tag(tags.get('genre', []), True)
         self.albumartist = read_tag(tags.get('albumartist'))
         self.cover       = None
+        self.extras      = {read_tag(k): v for k,v in tags.items()
+                                     if k not in self.required_tags}
+        print(self.__dict__)
 
     # Identify the song
     # When overwrite is set to True, it will identify the song based on the content
@@ -177,12 +184,12 @@ class Song():
 
     # Parse the metadata from the LastFM API
     def _parse_metadata(self, metadata):
-        self.title  = metadata.get('title')  or self.title
-        self.artist = metadata.get('artist') or self.artist
-        self.album  = metadata.get('album')  or self.album
-        self.track  = metadata.get('track')  or self.track
-        self.cover  = metadata.get('cover')  or self.cover
-        self.mbid   = metadata.get('mbid')   or self.mbid
+        self.title       = metadata.get('title')  or self.title
+        self.artist      = metadata.get('artist') or self.artist
+        self.album       = metadata.get('album')  or self.album
+        self.tracknumber = metadata.get('track')  or self.tracknumber
+        self.cover       = metadata.get('cover')  or self.cover
+        self.mbid        = metadata.get('mbid')   or self.mbid
         if metadata.get('tags'):
             genres = []
             for tag in metadata['tags']:
@@ -193,19 +200,14 @@ class Song():
 
 
     def get_tags(self):
-        def rename(tags, from_, to_):
-            if tags.get(from_):
-                tags[to_] = tags[from_]
-                del tags[from_]
         tags = {}
         for tag in self.required_tags:
             if hasattr(self, tag):
                 tags[tag] = getattr(self, tag)
-        # Clean-up
-        rename(tags, 'track', 'tracknumber')
-        rename(tags, 'year', 'date')
         if tags.get('cover'):
             del tags['cover'] # will add image separately
+        tags.update(self.extras)
+        print(tags)
         return tags
 
 
@@ -243,7 +245,7 @@ class Album():
         song = Song(file_, self.force)
         # Check if album data is available
         if not self.lookup_done and song.artist:
-            data = album_by_title(song.artist, self.directory)
+            data = album_by_title(song.artist, self._clean(self.directory))
             if data:
                 self._parse_metadata(data)
                 self.lookup_done = True
@@ -263,13 +265,15 @@ class Album():
             # Append album genres to song genres
             song.genre = list(set(self.tags+[x.title() for x in song.genre]))
             # Find correct track number
-            song.track = self.tracks.get(self._clean(song.title))
-            if song.track is None: # Parse all tracks to see if a subset is available
+            song.tracknumber = self.tracks.get(self._clean(song.title))
+            if song.tracknumber is None: # Parse all tracks to see if a subset is available
+                print("Looking track for %s"%song.title)
                 for title, track in self.tracks.items():
                     if title in song.title: # Gets around (HD) and (cover) problems
-                        song.track = track
+                        song.tracknumber = track
                         break
             song.save(save_as, delimiter)
+        print(self.tracks)
 
 
     def _parse_metadata(self, metadata):
@@ -282,10 +286,18 @@ class Album():
                 self.tags.append(tag.title())
         self.tracks = {self._clean(k): v for k,v in metadata.get('songs').items()}
 
+    def _clean(self, title):
+        def re_search(d, pattern):
+            m = re.search(pattern, d)
+            if m: return m.group(1)
+            return d
+        title = title.replace("’", "'")
+        title = re_search(title, "^\d{4}\s*-\s*(.+)$") # year - title
+        title = re_search(title, "^\(\d{4}\)(.+)$")    # (year) title
+        title = re_search(title, "^(.+)\(.*\)$")       # title (info)
+        title = title.strip("- _")
+        return title
 
-    def _clean(self, data):
-        data = data.replace("’", "'")
-        return data
 
 if __name__ == "__main__":
     argParser = argparse.ArgumentParser(description=DESCRIPTION)
@@ -307,6 +319,3 @@ if __name__ == "__main__":
         if args.d:
             print("[+] Saving Album %s"%os.path.basename(album.directory))
         album.save()
-
-
-#TODO: - re-add tags that were already present
