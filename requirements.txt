@@ -1,0 +1,4 @@
+acoustid
+mutagen
+pydub
+Image
