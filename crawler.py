@@ -145,13 +145,11 @@ class Song():
         year = re.search("^.*(\d{4}).*$", self.date)
         if year: self.date = year.group(1)
         self.tracknumber = read_tag(tags.get('tracknumber'))
-        print(self.tracknumber)
         self.genre       = read_tag(tags.get('genre', []), True)
         self.albumartist = read_tag(tags.get('albumartist'))
         self.cover       = None
         self.extras      = {read_tag(k): v for k,v in tags.items()
                                      if k not in self.required_tags}
-        print(self.__dict__)
 
     # Identify the song
     # When overwrite is set to True, it will identify the song based on the content
@@ -207,7 +205,6 @@ class Song():
         if tags.get('cover'):
             del tags['cover'] # will add image separately
         tags.update(self.extras)
-        print(tags)
         return tags
 
 
@@ -273,7 +270,6 @@ class Album():
                         song.tracknumber = track
                         break
             song.save(save_as, delimiter)
-        print(self.tracks)
 
 
     def _parse_metadata(self, metadata):
