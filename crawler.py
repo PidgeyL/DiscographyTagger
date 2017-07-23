@@ -32,6 +32,12 @@ ALBUMTITLESEARCH = LASTFM_URL+"?method=album.getinfo&api_key=%s&artist=%s&album=
 ALBUM_CACHE = {}
 COVER_CACHE = {}
 
+def xtitle(string):
+    skipList = ['a', 'an', 'of', 'the', 'is', 'am']
+    return " ".join([x.lower() if x.lower() in skipList else x.capitalize()
+                       for x in string.split()])
+
+
 # Buffer images and convert them to JPEG format (takes less disk space)
 def _get_cover(url):
     if not COVER_CACHE.get(url):
@@ -85,7 +91,7 @@ def _parse_album(data):
     for cover in data.get('image'):
         if cover.get("size") == "large":
             album['cover'] = cover.get('#text')
-    album['tags'] = [x.get('name', "").title()
+    album['tags'] = [xtitle(x.get('name', ""))
                        for x in data.get('tags', {}).get('tag',[])]
     album['songs'] = {x.get('name'): x.get('@attr', {}).get('rank')
                         for x in data.get('tracks', {}).get('track', [])}
@@ -116,9 +122,9 @@ def album_by_title(artist, title):
 
 
 class Song():
-    #__slots__ = ('path', 'mbid', 'required_tags', 'type', 'extras',
-    #             'title', 'artist', 'album', 'date', 'tracknumber',
-    #             'genre', 'cover', 'albumartist')
+    __slots__ = ('path', 'mbid', 'required_tags', 'type', 'extras',
+                 'title', 'artist', 'album', 'date', 'tracknumber',
+                 'genre', 'cover', 'albumartist')
     def __init__(self, path_, type_=None, overwrite=False):
         self.required_tags = ('title', 'artist', 'album', 'date',
                               'tracknumber', 'genre', 'cover', 'albumartist')
@@ -162,8 +168,8 @@ class Song():
                 self._get_info_from_metadata()
             else:
                 score, mbid, title, artist = possibilities[0]
-                self.title  = title.title()
-                self.artist = artist.title()
+                self.title  = xtitle(title)
+                self.artist = xtitle(artist)
                 self.mbid   = mbid
         if not self._get_info_from_metadata(verbose = False):
             self._identify(True)
@@ -191,7 +197,7 @@ class Song():
         if metadata.get('tags'):
             genres = []
             for tag in metadata['tags']:
-                if tag.title() not in [self.title, self.artist, self.album]:
+                if xtitle(tag) not in [self.title, self.artist, self.album]:
                     # Assume it's a genre. Will be elaborated upon later
                     genres.append(tag)
             self.genre = genres
@@ -225,6 +231,8 @@ class Song():
             i.mime = 'image/png'
             f.add_picture(i)
             f.save()
+        if os.path.realpath(name) is not os.path.realpath(self.path):
+            os.remove(self.path)
 
 
 class Album():
@@ -236,20 +244,23 @@ class Album():
         self.directory   = directory
         self.force       = force
         self.lookup_done = False
-        self.name        = None
+        self.name        = directory
 
     def add_song(self, file_):
-        song = Song(file_, self.force)
-        # Check if album data is available
-        if not self.lookup_done and song.artist:
-            data = album_by_title(song.artist, self._clean(self.directory))
+        def get_album_info():
+            data = album_by_title(song.artist, self._clean(self.name))
             if data:
                 self._parse_metadata(data)
                 self.lookup_done = True
-            else:
+                return True
+            return False
+        song = Song(file_, self.force)
+        # Check if album data is available
+        if not self.lookup_done and song.artist:
+            if not get_album_info():
                 if song.album:
-                    self.name   = song.album
-                    self.artist = song.artist
+                    self.name = song.album
+                    get_album_info()
         self.songs.append(song)
 
 
@@ -260,26 +271,28 @@ class Album():
             song.cover       = self.cover  or song.cover
             song.albumartist = self.artist or song.albumartist
             # Append album genres to song genres
-            song.genre = list(set(self.tags+[x.title() for x in song.genre]))
+            song.genre = list(set(self.tags+[xtitle(x) for x in song.genre]))
             # Find correct track number
             song.tracknumber = self.tracks.get(self._clean(song.title))
             if song.tracknumber is None: # Parse all tracks to see if a subset is available
                 print("Looking track for %s"%song.title)
+                print(self.tracks)
+                print(self._clean(song.title))
                 for title, track in self.tracks.items():
-                    if title in song.title: # Gets around (HD) and (cover) problems
+                    if title in self._clean(song.title): # Gets around (HD) and (cover) problems
                         song.tracknumber = track
                         break
             song.save(save_as, delimiter)
 
 
     def _parse_metadata(self, metadata):
-        self.name   = metadata.get('name').title()
-        self.artist = metadata.get('artist').title()
+        self.name   = xtitle(metadata.get('name'))
+        self.artist = xtitle(metadata.get('artist'))
         self.cover  = metadata.get('cover')
         self.tags = []
         for tag in metadata.get('tags'):
             if (not re.match("^\d{4}$", tag)):
-                self.tags.append(tag.title())
+                self.tags.append(xtitle(tag))
         self.tracks = {self._clean(k): v for k,v in metadata.get('songs').items()}
 
     def _clean(self, title):
@@ -292,6 +305,7 @@ class Album():
         title = re_search(title, "^\(\d{4}\)(.+)$")    # (year) title
         title = re_search(title, "^(.+)\(.*\)$")       # title (info)
         title = title.strip("- _")
+        title = xtitle(title)
         return title
 
 
@@ -315,3 +329,6 @@ if __name__ == "__main__":
         if args.d:
             print("[+] Saving Album %s"%os.path.basename(album.directory))
         album.save()
+
+# TODO: - Try-catch around the urllibs, to retry on failure
+#       - Count amount of songs in album, to add that info to the song
