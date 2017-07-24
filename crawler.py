@@ -32,6 +32,9 @@ ALBUMTITLESEARCH = LASTFM_URL+"?method=album.getinfo&api_key=%s&artist=%s&album=
 ALBUM_CACHE = {}
 COVER_CACHE = {}
 
+
+_CD_PATTERN = re.compile("^(.*(\s|-|_)+)*cd(\s|-|_)*\d+((\s|-|_)+.*)*$", re.IGNORECASE)
+
 def xtitle(string):
     skipList = ['a', 'an', 'of', 'the', 'is', 'am']
     return " ".join([x.lower() if x.lower() in skipList else x.capitalize()
@@ -245,6 +248,10 @@ class Album():
         self.force       = force
         self.lookup_done = False
         self.name        = directory
+        # This solves CD-2 kind of issues
+        if re.match(_CD_PATTERN, self.name):
+            self.name = os.path.basename(os.path.dirname(self.name))
+
 
     def add_song(self, file_):
         def get_album_info():
@@ -275,13 +282,11 @@ class Album():
             # Find correct track number
             song.tracknumber = self.tracks.get(self._clean(song.title))
             if song.tracknumber is None: # Parse all tracks to see if a subset is available
-                print("Looking track for %s"%song.title)
-                print(self.tracks)
-                print(self._clean(song.title))
                 for title, track in self.tracks.items():
                     if title in self._clean(song.title): # Gets around (HD) and (cover) problems
                         song.tracknumber = track
                         break
+            song.tracknumber = "%s/%s"%(song.tracknumber, len(self.songs))
             song.save(save_as, delimiter)
 
 
@@ -331,4 +336,7 @@ if __name__ == "__main__":
         album.save()
 
 # TODO: - Try-catch around the urllibs, to retry on failure
-#       - Count amount of songs in album, to add that info to the song
+#       - Output warnings if no info was found for album
+#       - see if parsing tags from individual songs is worth it
+#       - if no album is found before saving, try to find the album based on song info, rather than album info
+#       - output results to a CSV file (option)
